@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>问号秘境</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js">
     </script>
@@ -62,11 +62,11 @@
             // ============ 创建物理引擎 ============
             const engine = Engine.create();
             const world = engine.world;
-            engine.gravity.y = 1.2; // 稍强的重力，让下落更明显
+            engine.gravity.y = 1.2;
 
             // ============ Canvas 尺寸设置 ============
             function resizeCanvas() {
-                const dpr = Math.min(window.devicePixelRatio || 1, 2); // 限制像素比为2以保证性能
+                const dpr = Math.min(window.devicePixelRatio || 1, 2);
                 canvas.width = window.innerWidth * dpr;
                 canvas.height = window.innerHeight * dpr;
                 canvas.style.width = window.innerWidth + 'px';
@@ -102,22 +102,6 @@
                 Composite.add(world, [wallTop, wallBottom, wallLeft, wallRight]);
             }
 
-            function updateWalls() {
-                const w = window.innerWidth;
-                const h = window.innerHeight;
-                const thickness = 60;
-                const offset = thickness / 2;
-
-                Body.setPosition(wallTop, { x: w / 2, y: -offset });
-                Body.setPosition(wallBottom, { x: w / 2, y: h + offset });
-                Body.setPosition(wallLeft, { x: -offset, y: h / 2 });
-                Body.setPosition(wallRight, { x: w + offset, y: h / 2 });
-
-                // 更新墙壁尺寸
-                Body.scale(wallTop, (w + thickness * 2) / wallTop.bounds.max.x + wallTop.bounds.min.x ? 1 : 1, 1);
-                // 使用 setVertices 更可靠，但为简单起见，移除并重建
-            }
-
             function rebuildWalls() {
                 if (wallTop) Composite.remove(world, wallTop);
                 if (wallBottom) Composite.remove(world, wallBottom);
@@ -125,15 +109,63 @@
                 if (wallRight) Composite.remove(world, wallRight);
                 createWalls();
             }
-
             createWalls();
 
             // ============ 存储body元数据的Map ============
-            const bodyMetaMap = new Map(); // body.id -> { type: 'big'|'cat', char: string, fontSize: number, color: string }
+            const bodyMetaMap = new Map(); // body.id -> { type, char, fontSize, color, createdAt }
 
             // ============ 存储分类引用 ============
-            const bigChars = []; // "问号秘境"四个字的body
-            const catChars = []; // 所有"猫"字的body
+            const bigChars = [];
+            const catChars = [];
+
+            // ============ 粒子系统 ============
+            const particles = [];
+
+            function spawnParticles(x, y, color = '#b0b0b0', count = 10) {
+                for (let i = 0; i < count; i++) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const speed = 1.5 + Math.random() * 2.5;
+                    particles.push({
+                        x: x,
+                        y: y,
+                        vx: Math.cos(angle) * speed,
+                        vy: Math.sin(angle) * speed,
+                        life: 0.4 + Math.random() * 0.3,
+                        maxLife: 0.4 + Math.random() * 0.3,
+                        size: 2 + Math.random() * 3,
+                        color: color
+                    });
+                }
+            }
+
+            function updateParticles(deltaTime) {
+                // deltaTime 单位为秒
+                for (let i = particles.length - 1; i >= 0; i--) {
+                    const p = particles[i];
+                    p.life -= deltaTime;
+                    if (p.life <= 0) {
+                        particles.splice(i, 1);
+                        continue;
+                    }
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    p.vx *= 0.96;
+                    p.vy *= 0.96;
+                }
+            }
+
+            function drawParticles(ctx) {
+                for (const p of particles) {
+                    const alpha = Math.max(0, p.life / p.maxLife);
+                    ctx.save();
+                    ctx.globalAlpha = alpha;
+                    ctx.fillStyle = p.color;
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.restore();
+                }
+            }
 
             // ============ 创建"问号秘境"四个大字 ============
             function createBigChars() {
@@ -142,10 +174,9 @@
                 const centerX = w / 2;
                 const centerY = h / 2;
 
-                const charSize = 85; // 刚体边长
-                const gap = 20; // 字之间的间距
-                const halfTotal = charSize + gap / 2; // 中心到字中心的距离
-                const halfChar = charSize / 2;
+                const charSize = 85;
+                const gap = 20;
+                const halfTotal = charSize + gap / 2;
 
                 const positions = [
                     { char: '问', x: centerX - halfTotal, y: centerY - halfTotal },
@@ -165,17 +196,14 @@
 
                 positions.forEach(({ char, x, y }) => {
                     const body = Bodies.rectangle(x, y, charSize, charSize, bodyOptions);
-                    // 给每个字一个微小的初始旋转扰动，让它们下落时能自然旋转
-                    Body.setAngularVelocity(body, (Math.random() - 0.5) * 0.3);
-                    Body.setVelocity(body, { x: (Math.random() - 0.5) * 0.5, y: (Math.random() - 0.5) * 0.5 });
-
+                    // 【修改】去除了初始旋转和初始线速度，保持静止
                     bodyMetaMap.set(body.id, {
                         type: 'big',
                         char: char,
                         fontSize: 62,
-                        color: '#ffffff'
+                        color: '#ffffff',
+                        createdAt: 0 // 大字无延迟需求
                     });
-
                     bigChars.push(body);
                     Composite.add(world, body);
                 });
@@ -196,19 +224,24 @@
                 };
 
                 const body = Bodies.rectangle(x, y, catSize, catSize, bodyOptions);
-                // 微小的初始随机速度
-                Body.setAngularVelocity(body, (Math.random() - 0.5) * 0.4);
-                Body.setVelocity(body, { x: (Math.random() - 0.5) * 0.6, y: (Math.random() - 0.5) * 0.6 });
+                // 微小的初始随机速度，但保留一些活力
+                Body.setAngularVelocity(body, (Math.random() - 0.5) * 0.2);
+                Body.setVelocity(body, { x: (Math.random() - 0.5) * 0.3, y: (Math.random() - 0.5) * 0.3 });
 
+                // 【新增】记录创建时间，用于延迟可点击
                 bodyMetaMap.set(body.id, {
                     type: 'cat',
                     char: '猫',
                     fontSize: 28,
-                    color: '#b0b0b0'
+                    color: '#b0b0b0',
+                    createdAt: Date.now()
                 });
 
                 catChars.push(body);
                 Composite.add(world, body);
+
+                // 【新增】生成粒子特效
+                spawnParticles(x, y, '#b0b0b0', 10);
                 return body;
             }
 
@@ -218,13 +251,15 @@
                 if (index > -1) {
                     catChars.splice(index, 1);
                 }
+                // 【新增】删除时获取位置并生成粒子
+                const pos = body.position;
+                spawnParticles(pos.x, pos.y, '#b0b0b0', 12);
                 bodyMetaMap.delete(body.id);
                 Composite.remove(world, body);
             }
 
             // ============ 鼠标交互 ============
             const mouse = Mouse.create(canvas);
-            // 设置鼠标像素比以匹配Canvas缩放
             mouse.pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
 
             const mouseConstraint = MouseConstraint.create(engine, {
@@ -236,13 +271,10 @@
                 }
             });
 
-            // 只允许拖动非静态body
             mouseConstraint.collisionFilter.mask = 0xFFFFFFFF;
-            // 允许拖动所有动态body
             Events.on(mouseConstraint, 'mousedown', function(event) {
                 const draggedBody = event.source.body;
                 if (draggedBody && draggedBody.isStatic) {
-                    // 不拖动静态墙壁
                     mouseConstraint.body = null;
                 }
             });
@@ -252,16 +284,53 @@
             // ============ 点击检测 ============
             let mouseDownPos = null;
             let mouseDownBody = null;
-            const CLICK_THRESHOLD = 6; // 移动距离小于此值视为点击
+            const CLICK_THRESHOLD = 6;
+            const CAT_DELAY_MS = 300; // “猫”不可点击的延迟时间
+
+            function handleClickAt(pos) {
+                const bodiesUnder = Query.point(Composite.allBodies(world), pos);
+                const nonStaticBodies = bodiesUnder.filter(b => !b.isStatic);
+
+                let hitBigChar = null;
+                let hitCat = null;
+
+                for (const body of nonStaticBodies) {
+                    const meta = bodyMetaMap.get(body.id);
+                    if (meta && meta.type === 'big') {
+                        hitBigChar = body;
+                        break;
+                    }
+                    if (meta && meta.type === 'cat' && !hitCat) {
+                        hitCat = body;
+                    }
+                }
+
+                if (hitBigChar) {
+                    // 点击大字不操作
+                    return;
+                }
+
+                if (hitCat) {
+                    const meta = bodyMetaMap.get(hitCat.id);
+                    // 【修改】检查延迟：创建时间超过300ms才能删除
+                    if (meta && Date.now() - meta.createdAt > CAT_DELAY_MS) {
+                        removeCat(hitCat);
+                    }
+                    return;
+                }
+
+                // 空白处生成猫
+                if (nonStaticBodies.length === 0) {
+                    createCat(pos.x, pos.y);
+                }
+            }
 
             canvas.addEventListener('mousedown', function(e) {
                 const rect = canvas.getBoundingClientRect();
-                const dpr = Math.min(window.devicePixelRatio || 1, 2);
                 const x = (e.clientX - rect.left);
                 const y = (e.clientY - rect.top);
                 mouseDownPos = { x, y };
 
-                // 检测mousedown位置下的body
                 const bodiesUnder = Query.point(Composite.allBodies(world), { x, y });
                 const nonStaticBodies = bodiesUnder.filter(b => !b.isStatic);
                 mouseDownBody = nonStaticBodies.length > 0 ? nonStaticBodies[0] : null;
@@ -271,7 +340,6 @@
                 if (!mouseDownPos) return;
 
                 const rect = canvas.getBoundingClientRect();
-                const dpr = Math.min(window.devicePixelRatio || 1, 2);
                 const x = (e.clientX - rect.left);
                 const y = (e.clientY - rect.top);
                 const mouseUpPos = { x, y };
@@ -280,48 +348,18 @@
                 const dy = mouseUpPos.y - mouseDownPos.y;
                 const dist = Math.sqrt(dx * dx + dy * dy);
 
-                // 判断是否为短点击
                 if (dist < CLICK_THRESHOLD) {
-                    // 检测点击位置下的所有body
-                    const bodiesUnder = Query.point(Composite.allBodies(world), mouseUpPos);
-                    const nonStaticBodies = bodiesUnder.filter(b => !b.isStatic);
-
-                    let hitBigChar = null;
-                    let hitCat = null;
-
-                    for (const body of nonStaticBodies) {
-                        const meta = bodyMetaMap.get(body.id);
-                        if (meta && meta.type === 'big') {
-                            hitBigChar = body;
-                            break; // 优先检测大字
-                        }
-                        if (meta && meta.type === 'cat' && !hitCat) {
-                            hitCat = body;
-                        }
-                    }
-
-                    if (hitBigChar) {
-                        // 点击在大字上，不生成"猫"，也不删除任何东西
-                        // （MouseConstraint已经处理了可能的拖动）
-                    } else if (hitCat) {
-                        // 点击在"猫"上，删除它
-                        removeCat(hitCat);
-                    } else if (nonStaticBodies.length === 0) {
-                        // 点击在空白处，生成"猫"
-                        createCat(mouseUpPos.x, mouseUpPos.y);
-                    }
+                    handleClickAt(mouseUpPos);
                 }
-                // 如果移动距离大（拖动），什么都不做，物体已被拖动
 
                 mouseDownPos = null;
                 mouseDownBody = null;
             });
 
-            // 处理触摸事件（移动端）
+            // 触摸事件
             canvas.addEventListener('touchstart', function(e) {
                 if (e.touches.length === 1) {
                     const rect = canvas.getBoundingClientRect();
-                    const dpr = Math.min(window.devicePixelRatio || 1, 2);
                     const x = (e.touches[0].clientX - rect.left);
                     const y = (e.touches[0].clientY - rect.top);
                     mouseDownPos = { x, y };
@@ -334,10 +372,7 @@
 
             canvas.addEventListener('touchend', function(e) {
                 if (!mouseDownPos) return;
-                // 使用changedTouches获取结束位置
                 const rect = canvas.getBoundingClientRect();
-                const dpr = Math.min(window.devicePixelRatio || 1, 2);
-                // touchend没有touches，使用changedTouches
                 const lastTouch = e.changedTouches[0];
                 const x = lastTouch ? (lastTouch.clientX - rect.left) : mouseDownPos.x;
                 const y = lastTouch ? (lastTouch.clientY - rect.top) : mouseDownPos.y;
@@ -347,38 +382,14 @@
                 const dy = mouseUpPos.y - mouseDownPos.y;
                 const dist = Math.sqrt(dx * dx + dy * dy);
 
-                if (dist < CLICK_THRESHOLD * 1.5) { // 触摸稍微放宽阈值
-                    const bodiesUnder = Query.point(Composite.allBodies(world), mouseUpPos);
-                    const nonStaticBodies = bodiesUnder.filter(b => !b.isStatic);
-
-                    let hitBigChar = null;
-                    let hitCat = null;
-
-                    for (const body of nonStaticBodies) {
-                        const meta = bodyMetaMap.get(body.id);
-                        if (meta && meta.type === 'big') {
-                            hitBigChar = body;
-                            break;
-                        }
-                        if (meta && meta.type === 'cat' && !hitCat) {
-                            hitCat = body;
-                        }
-                    }
-
-                    if (hitBigChar) {
-                        // 不操作
-                    } else if (hitCat) {
-                        removeCat(hitCat);
-                    } else if (nonStaticBodies.length === 0) {
-                        createCat(mouseUpPos.x, mouseUpPos.y);
-                    }
+                if (dist < CLICK_THRESHOLD * 1.5) {
+                    handleClickAt(mouseUpPos);
                 }
 
                 mouseDownPos = null;
                 mouseDownBody = null;
             }, { passive: false });
 
-            // 防止在canvas上的右键菜单
             canvas.addEventListener('contextmenu', function(e) {
                 e.preventDefault();
             });
@@ -387,24 +398,30 @@
             window.addEventListener('resize', function() {
                 resizeCanvas();
                 rebuildWalls();
-                // 更新mouse的像素比
                 mouse.pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
             });
 
             // ============ 渲染循环 ============
+            let lastTime = performance.now();
+
             function render() {
-                // 清屏 - 黑色背景
+                const now = performance.now();
+                const deltaTime = (now - lastTime) / 1000; // 秒
+                lastTime = now;
+
+                // 清屏
                 ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
                 ctx.fillStyle = '#000000';
                 ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
 
-                // 收集所有需要渲染的body（大字+猫字）
-                const allRenderBodies = [...bigChars, ...catChars];
+                // 更新粒子
+                updateParticles(deltaTime);
 
-                // 按y坐标排序，让下方的物体后绘制（简单的深度排序）
+                // 收集渲染body
+                const allRenderBodies = [...bigChars, ...catChars];
                 allRenderBodies.sort((a, b) => a.position.y - b.position.y);
 
-                // 渲染每个body
+                // 绘制文字
                 for (const body of allRenderBodies) {
                     const meta = bodyMetaMap.get(body.id);
                     if (!meta) continue;
@@ -413,7 +430,6 @@
                     ctx.translate(body.position.x, body.position.y);
                     ctx.rotate(body.angle);
 
-                    // 文字阴影（增加立体感）
                     ctx.shadowColor = meta.type === 'big' ?
                         'rgba(255, 255, 255, 0.25)' :
                         'rgba(180, 180, 180, 0.2)';
@@ -421,47 +437,30 @@
                     ctx.shadowOffsetX = 0;
                     ctx.shadowOffsetY = 0;
 
-                    // 绘制文字
                     ctx.fillStyle = meta.color;
                     ctx.font = `bold ${meta.fontSize}px "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif`;
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
                     ctx.fillText(meta.char, 0, 0);
 
-                    // 清除阴影
                     ctx.shadowColor = 'transparent';
                     ctx.shadowBlur = 0;
-
                     ctx.restore();
-
-                    // 可选：绘制碰撞箱轮廓（调试用，注释掉）
-                    // ctx.save();
-                    // ctx.strokeStyle = meta.type === 'big' ? 'rgba(255,255,255,0.15)' : 'rgba(180,180,180,0.12)';
-                    // ctx.lineWidth = 1;
-                    // ctx.translate(body.position.x, body.position.y);
-                    // ctx.rotate(body.angle);
-                    // const w = body.bounds.max.x - body.bounds.min.x;
-                    // const h = body.bounds.max.y - body.bounds.min.y;
-                    // ctx.strokeRect(-w / 2, -h / 2, w, h);
-                    // ctx.restore();
                 }
+
+                // 绘制粒子（在最上层）
+                drawParticles(ctx);
             }
 
-            // ============ 游戏循环 ============
             function gameLoop() {
                 Engine.update(engine, 1000 / 60);
                 render();
                 requestAnimationFrame(gameLoop);
             }
 
-            // ============ 启动 ============
             gameLoop();
 
-            console.log('✨ 问号秘境已就绪');
-            console.log('  🖱️ 拖动"问号秘境"四个大字 - 有惯性效果');
-            console.log('  🖱️ 点击空白处生成"猫"字');
-            console.log('  🖱️ 点击"猫"字使其消失');
-            console.log('  📱 支持移动端触摸操作');
+            console.log('✨ 问号秘境 · 猫字延迟消失 + 粒子特效已启用');
         })();
     </script>
 </body>
